@@ -11,7 +11,7 @@ import * as Notifications from 'expo-notifications';
 import { getDatabase, ref, push, set } from 'firebase/database';
 import { storage, database } from '../firebaseConfig';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { collection, addDoc } from 'firebase/firestore'; 
+import { collection, getDoc, addDoc, doc } from 'firebase/firestore'; 
 import { firestore } from '../firebaseConfig';
 import axios from 'axios';
 
@@ -32,6 +32,9 @@ const App = () => {
   const [emergencySent, setEmergencySent] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [verificationStep, setVerificationStep] = useState(0); // 0: Phone input, 1: Code input, 2: Personal info
+
+  // State to store user data from Firestore
+  const [userData, setUserData] = useState({ firstname: '', lastname: '', phoneNumber: '' });
 
   const [phoneNumber, setPhoneNumber] = useState('');
   const [isPhoneNumberValid, setIsPhoneNumberValid] = useState(true);
@@ -54,10 +57,27 @@ const App = () => {
 
   useEffect(() => {
     requestPermissions();
+    fetchUserData(); // Fetch user data when component mounts
     if (buttonText === 'Waiting for Response') {
       startPulse();
     }
   }, [buttonText]);
+
+  // Fetch user data from Firestore
+  const fetchUserData = async () => {
+    try {
+      const docRef = doc(firestore, 'personalInfo', 'AxlXnxa2Cv35hRfGVOXJ'); // Replace with actual user ID
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists()) {
+        setUserData(docSnap.data()); // Set the user data in state
+      } else {
+        console.log("No such document!");
+      }
+    } catch (error) {
+      console.error("Error fetching user data:", error);
+    }
+  };
 
   useEffect(() => {
     if (systemColorScheme === 'dark' && !darkMode) {
@@ -327,18 +347,6 @@ const App = () => {
     }
   };
   
-  
-  
-
-  const handlePhoneSubmit = () => {
-    if (!validatePhoneNumber(phoneNumber)) {
-      setIsPhoneNumberValid(false);
-    } else {
-      setIsPhoneNumberValid(true);
-      setVerificationStep(1);
-    }
-  };
-
   const handleCodeSubmit = async () => {
     try {
       const response = await axios.post('http://192.168.1.105:8000/api/verify-code', {
@@ -357,8 +365,6 @@ const App = () => {
       Alert.alert('Error', 'Failed to verify the code.');
     }
   };
-  
-  
 
   const handlePersonalInfoSubmit = async () => {
     const isPhoneValid = validatePhoneNumber(personalInfo.phoneNumber);
@@ -390,7 +396,6 @@ const App = () => {
       Alert.alert('Error', 'There was an error saving your personal information.');
     }
   };
-  
 
   const handleProfileImageUpload = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -472,8 +477,6 @@ const App = () => {
       </View>
     );
   }
-  
-  
 
   if (verificationStep === 1) {
     return (
@@ -577,10 +580,15 @@ const App = () => {
     <View style={styles.container}>
       <View style={styles.header}>
         <View style={styles.profileContainer}>
-        <Image source={require('../assets/images/avatar.png')} style={styles.profileImage} />
-
-          <Text style={styles.name}>Juan Dela Cruz</Text>
-          <Text style={styles.phone}>+63**********</Text>
+          {userData.firstname ? (
+            <>
+              <Image source={require('../assets/images/avatar.png')} style={styles.profileImage} />
+              <Text style={styles.name}>{userData.firstname} {userData.lastname}</Text>
+              <Text style={styles.phone}>{userData.phoneNumber}</Text>
+            </>
+          ) : (
+            <Text>Loading...</Text>
+          )}
         </View>
       </View>
       <View style={styles.body}>

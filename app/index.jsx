@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image, TextInput, Alert, Animated, useColorScheme, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import CustomToggleSwitch from './CustomToggleSwitch'; // Import the custom toggle switch component
+import CustomToggleSwitch from './CustomToggleSwitch';
 import * as ImagePicker from 'expo-image-picker';
 import { Camera } from 'expo-camera';
 import { Audio } from 'expo-av';
@@ -11,7 +11,7 @@ import * as Notifications from 'expo-notifications';
 import { getDatabase, ref, push, set } from 'firebase/database';
 import { storage, database } from '../firebaseConfig';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { collection, getDoc, addDoc, doc } from 'firebase/firestore'; 
+import { collection, getDoc, addDoc, doc, query, where, getDocs } from 'firebase/firestore'; 
 import { firestore } from '../firebaseConfig';
 import axios from 'axios';
 
@@ -31,11 +31,9 @@ const App = () => {
   const [cancelTimer, setCancelTimer] = useState(4);
   const [emergencySent, setEmergencySent] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
-  const [verificationStep, setVerificationStep] = useState(0); // 0: Phone input, 1: Code input, 2: Personal info
-
-  // State to store user data from Firestore
-  const [userData, setUserData] = useState({ firstname: '', lastname: '', phoneNumber: '' });
-
+  const [verificationStep, setVerificationStep] = useState(0); // 0: Email input, 1: Code input, 2: Personal info, 3: Dashboard
+  const [emailExists, setEmailExists] = useState(false); // Track if email exists
+  const [userData, setUserData] = useState({ firstname: '', lastname: '', phoneNumber: '', profileImageUri: '' });
   const [phoneNumber, setPhoneNumber] = useState('');
   const [isPhoneNumberValid, setIsPhoneNumberValid] = useState(true);
   const [verificationCode, setVerificationCode] = useState('');
@@ -49,7 +47,6 @@ const App = () => {
   const [profileImageUri, setProfileImageUri] = useState('');
   const [accountCreated, setAccountCreated] = useState(false);
   const [isFormValid, setIsFormValid] = useState(true);
-
   const pulseAnimation = useRef(new Animated.Value(1)).current;
   const cancelAnimation = useRef(new Animated.Value(0)).current;
   const slideAnimation = useRef(new Animated.Value(0)).current;
@@ -57,25 +54,29 @@ const App = () => {
 
   useEffect(() => {
     requestPermissions();
-    fetchUserData(); // Fetch user data when component mounts
     if (buttonText === 'Waiting for Response') {
       startPulse();
     }
   }, [buttonText]);
 
-  // Fetch user data from Firestore
-  const fetchUserData = async () => {
+  // Fetch user data based on email
+  const fetchUserData = async (email) => {
     try {
-      const docRef = doc(firestore, 'personalInfo', 'AxlXnxa2Cv35hRfGVOXJ'); // Replace with actual user ID
-      const docSnap = await getDoc(docRef);
-
-      if (docSnap.exists()) {
-        setUserData(docSnap.data()); // Set the user data in state
+      const q = query(collection(firestore, 'personalInfo'), where('email', '==', email));
+      const querySnapshot = await getDocs(q);
+  
+      if (!querySnapshot.empty) {
+        const doc = querySnapshot.docs[0].data();
+        setUserData(doc); // Set the fetched data in the state
+        setEmailExists(true); // Email exists
+        Alert.alert('Success', 'User data found!');
       } else {
-        console.log("No such document!");
+        Alert.alert('No user found with this email.');
+        setEmailExists(false);
       }
     } catch (error) {
       console.error("Error fetching user data:", error);
+      Alert.alert('Error', 'Failed to fetch user data.');
     }
   };
 
@@ -118,7 +119,7 @@ const App = () => {
   };
 
   const handleEmergencyPress = () => {
-    setVerificationStep(3); // Simulate navigation to the dashboard
+    setVerificationStep(3); // Navigate to the dashboard
   };
 
   const handleEmergencyLongPress = () => {
@@ -313,13 +314,11 @@ const App = () => {
   };
 
   const validateEmail = (email) => {
-    // Basic email validation regex
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
   };
 
   const validatePhoneNumber = (number) => {
-    // Basic phone number validation for 10 digits
     const phoneRegex = /^\d{10}$/;
     return phoneRegex.test(number);
   };
@@ -331,7 +330,9 @@ const App = () => {
     }
   
     try {
-      const response = await axios.post('http://192.168.1.105:8000/api/send-verification-code', {
+      await fetchUserData(personalInfo.email);
+  
+      const response = await axios.post('http://192.168.234.71:8000/api/send-verification-code', {
         email: personalInfo.email,
       });
   
@@ -349,13 +350,17 @@ const App = () => {
   
   const handleCodeSubmit = async () => {
     try {
-      const response = await axios.post('http://192.168.1.105:8000/api/verify-code', {
+      const response = await axios.post('http://192.168.234.71:8000/api/verify-code', {
         email: personalInfo.email,
         verification_code: verificationCode,
       });
   
       if (response.status === 200) {
-        setVerificationStep(2);
+        if (emailExists) {
+          setVerificationStep(3); // Skip personal info and go to dashboard if email exists
+        } else {
+          setVerificationStep(2); // Go to personal info form if email doesn't exist
+        }
         Alert.alert('Success', 'Email verified successfully.');
       } else {
         Alert.alert('Error', response.data.message);
@@ -390,6 +395,7 @@ const App = () => {
       const docRef = await addDoc(collection(firestore, 'personalInfo'), personalInfoWithImage);
       console.log('Personal info added with ID:', docRef.id);
   
+      setUserData(personalInfoWithImage); // Update the userData state with the submitted info
       setAccountCreated(true);
     } catch (error) {
       console.error('Error adding personal information: ', error);
@@ -451,6 +457,7 @@ const App = () => {
     }),
   };
 
+  // Email Input Step
   if (verificationStep === 0) {
     return (
       <View style={styles.container}>
@@ -478,13 +485,14 @@ const App = () => {
     );
   }
 
+  // Verification Code Step
   if (verificationStep === 1) {
     return (
       <View style={styles.container}>
         <View style={styles.verificationContainer}>
           <Ionicons name="chatbubble-outline" size={80} color="red" style={styles.verificationIcon} />
           <Text style={styles.verificationTitle}>Verification Code</Text>
-          <Text style={styles.verificationText}>Please type the verification code sent to +63**********</Text>
+          <Text style={styles.verificationText}>Please type the verification code sent to your email</Text>
           <View style={styles.codeInputContainer}>
             {[...Array(6)].map((_, index) => (
               <TextInput
@@ -509,6 +517,7 @@ const App = () => {
     );
   }
 
+  // Personal Information Step
   if (verificationStep === 2) {
     return (
       <View style={styles.container}>
@@ -576,13 +585,14 @@ const App = () => {
     );
   }
 
+  // Dashboard (profile info is displayed)
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <View style={styles.profileContainer}>
           {userData.firstname ? (
             <>
-              <Image source={require('../assets/images/avatar.png')} style={styles.profileImage} />
+              <Image source={{ uri: userData.profileImageUri || '../assets/images/avatar.png' }} style={styles.profileImage} />
               <Text style={styles.name}>{userData.firstname} {userData.lastname}</Text>
               <Text style={styles.phone}>{userData.phoneNumber}</Text>
             </>
